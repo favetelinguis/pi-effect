@@ -12,6 +12,7 @@ import { Type, type Static } from "typebox";
 import { ALL_EFFECT_IDS, formatEffect, type Grant } from "../effects/model.ts";
 import type { GrantStore } from "../effects/grants.ts";
 import type { PolicyLike } from "../effects/policy.ts";
+import { requiresGrant } from "../effects/gate.ts";
 import { makeHeader } from "../ui/header.ts";
 import type { EffectCatalog } from "./define.ts";
 
@@ -139,12 +140,13 @@ export function registerRequestEffectsTool(pi: ExtensionAPI, deps: Deps): void {
     name: "request_effects",
     label: "Request Effects",
     description:
-      "Request one or more effect grants from the user in a single batch, each with a one-sentence reason. " +
+      "Request one or more WRITE effect grants from the user in a single batch, each with a one-sentence reason. " +
+      "Read effects (fs.read, git.read, net.read) never need to be requested -- they are always allowed. " +
       `Valid effect ids: ${ALL_EFFECT_IDS.join(", ")}. ` +
-      "Call this ONCE per task after exploring with pure tools, listing every effect the task needs. Do not request effects you will not use.",
-    promptSnippet: "Request effect grants (fs.write, git.write, net.*) from the user in one batch",
+      "Call this ONCE per task after exploring with pure tools, listing every write effect the task needs. Do not request effects you will not use.",
+    promptSnippet: "Request write-effect grants (fs.write, git.write, net.write) from the user in one batch",
     promptGuidelines: [
-      "Before making changes, explore with pure tools, then call request_effects ONCE with every effect the task needs. Do not request effects you will not use.",
+      "Read effects (fs.read, git.read, net.read) are always allowed -- never request them. Before making changes, explore with pure tools, then call request_effects ONCE with every write effect the task needs. Do not request effects you will not use.",
       "If a call is blocked with 'not granted', call request_effects with a reason instead of retrying the same call.",
     ],
     parameters: RequestEffectsParams,
@@ -154,26 +156,38 @@ export function registerRequestEffectsTool(pi: ExtensionAPI, deps: Deps): void {
       const denied: string[] = [];
       const deniedByPolicy: string[] = [];
 
+      const alreadyAllowed: string[] = [];
       const requestable: RequestEffectsInput["effects"] = [];
       for (const req of params.effects) {
         const denyMatches = deps.policy.denies({ id: req.id, scope: req.scope });
         if (denyMatches.length > 0) {
           deniedByPolicy.push(formatEffect({ id: req.id, scope: req.scope }));
+        } else if (!requiresGrant({ id: req.id, scope: req.scope })) {
+          // Read effects are never gated -- nothing to ask the user, no grant to create.
+          alreadyAllowed.push(formatEffect({ id: req.id, scope: req.scope }));
         } else {
           requestable.push(req);
         }
       }
 
       if (!ctx.hasUI) {
-        const all = params.effects.map((r) => formatEffect({ id: r.id, scope: r.scope }));
+        const stillNeeded = requestable.map((r) => formatEffect({ id: r.id, scope: r.scope }));
+        const lines: string[] = [];
+        if (alreadyAllowed.length > 0) {
+          lines.push(`Already allowed, no grant needed: ${alreadyAllowed.join(", ")}`);
+        }
+        if (stillNeeded.length > 0) {
+          lines.push(
+            `No UI available to grant effects interactively (headless mode). Denied: ${stillNeeded.join(", ")}. Start pi with --grant <effect-ids> or configure defaultGrants in .pi/pi-effect.json.`,
+          );
+        }
+        if (deniedByPolicy.length > 0) {
+          lines.push(`Denied by policy (cannot be granted): ${deniedByPolicy.join(", ")}`);
+        }
+        if (lines.length === 0) lines.push("No effects requested.");
         return {
-          content: [
-            {
-              type: "text",
-              text: `No UI available to grant effects interactively (headless mode). Denied: ${all.join(", ")}. Start pi with --grant <effect-ids> or configure defaultGrants in .pi/pi-effect.json.`,
-            },
-          ],
-          details: { granted: [], denied: all },
+          content: [{ type: "text", text: lines.join("\n") }],
+          details: { granted: [], denied: [...stillNeeded, ...deniedByPolicy] },
         };
       }
 
@@ -203,6 +217,9 @@ export function registerRequestEffectsTool(pi: ExtensionAPI, deps: Deps): void {
       }
 
       const lines: string[] = [];
+      if (alreadyAllowed.length > 0) {
+        lines.push(`Already allowed, no grant needed: ${alreadyAllowed.join(", ")}`);
+      }
       if (granted.length > 0) lines.push(`Granted: ${granted.join(", ")}`);
       if (denied.length > 0) lines.push(`Denied: ${denied.join(", ")}`);
       if (deniedByPolicy.length > 0) lines.push(`Denied by policy (cannot be granted): ${deniedByPolicy.join(", ")}`);

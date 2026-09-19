@@ -10,6 +10,7 @@ import { ALL_EFFECT_IDS, formatEffect, isEffectId, type Effect, type Grant } fro
 import type { GrantStore } from "../effects/grants.ts";
 import type { PolicyLike } from "../effects/policy.ts";
 import { readAuditLines } from "../caps/audit.ts";
+import { requiresGrant } from "../effects/gate.ts";
 import { makeHeader } from "../ui/header.ts";
 
 export interface EffectsCommandDeps {
@@ -123,8 +124,9 @@ export function registerEffectsCommand(pi: ExtensionAPI, deps: EffectsCommandDep
             values: ["granted", "revoke"],
           }));
 
-          // Base unscoped ids, so ungranted effects can be granted from here too.
-          const baseItems: SettingItem[] = ALL_EFFECT_IDS.filter((id) => !deps.grants.list().some((g) => g.id === id && g.scope === undefined)).map((id) => ({
+          // Base unscoped ids, so ungranted effects can be granted from here too. Read
+          // ids are omitted: they're always allowed and have nothing to grant.
+          const baseItems: SettingItem[] = ALL_EFFECT_IDS.filter((id) => requiresGrant({ id }) && !deps.grants.list().some((g) => g.id === id && g.scope === undefined)).map((id) => ({
             id: `base\u0000${id}`,
             label: id,
             currentValue: "not granted",
@@ -137,7 +139,7 @@ export function registerEffectsCommand(pi: ExtensionAPI, deps: EffectsCommandDep
           container.addChild(
             makeHeader([
               theme.fg("accent", theme.bold("Effect Grants")),
-              theme.fg("dim", "Enter/Space to toggle. Active grants (incl. scoped) revoke directly; base ids grant unscoped. Esc closes."),
+              theme.fg("dim", "Read effects are always allowed and not shown here. Enter/Space to toggle write grants; Esc closes."),
               "",
             ]),
           );
@@ -225,7 +227,14 @@ export function registerEffectsCommand(pi: ExtensionAPI, deps: EffectsCommandDep
         deps.grants.add(grant);
         deps.persistGrant(grant, ctx);
         deps.updateStatus(ctx);
-        ctx.ui.notify(`Granted ${formatEffect(effect)} for this session.`, "info");
+        if (requiresGrant(effect)) {
+          ctx.ui.notify(`Granted ${formatEffect(effect)} for this session.`, "info");
+        } else {
+          ctx.ui.notify(
+            `Granted ${formatEffect(effect)} for this session (no-op: read effects are always allowed already).`,
+            "info",
+          );
+        }
         return;
       }
 
@@ -262,7 +271,7 @@ export function registerEffectsCommand(pi: ExtensionAPI, deps: EffectsCommandDep
           deps.persistRevoke({ id: g.id, scope: g.scope }, ctx);
         }
         deps.updateStatus(ctx);
-        ctx.ui.notify(`Cleared ${current.length} grant(s). Pure effects will re-prompt on next use unless auto-granted.`, "info");
+        ctx.ui.notify(`Cleared ${current.length} grant(s). Read-only tools are unaffected -- they never needed a grant.`, "info");
         return;
       }
 

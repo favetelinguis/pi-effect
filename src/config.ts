@@ -18,7 +18,6 @@ export interface DefaultGrantConfig {
 }
 
 export interface PiEffectConfig {
-  autoGrantRead: boolean;
   writeImpliesRead: boolean;
   defaultGrants: DefaultGrantConfig[];
   defaultDisabledTools: string[];
@@ -27,7 +26,6 @@ export interface PiEffectConfig {
 }
 
 export const DEFAULT_CONFIG: PiEffectConfig = {
-  autoGrantRead: true,
   writeImpliesRead: true,
   defaultGrants: [],
   defaultDisabledTools: ["git_push"],
@@ -47,7 +45,6 @@ async function readJsonIfExists(path: string): Promise<Partial<PiEffectConfig> |
 function mergeConfig(base: PiEffectConfig, override: Partial<PiEffectConfig> | undefined): PiEffectConfig {
   if (!override) return base;
   return {
-    autoGrantRead: override.autoGrantRead ?? base.autoGrantRead,
     writeImpliesRead: override.writeImpliesRead ?? base.writeImpliesRead,
     defaultGrants: override.defaultGrants ?? base.defaultGrants,
     defaultDisabledTools: override.defaultDisabledTools ?? base.defaultDisabledTools,

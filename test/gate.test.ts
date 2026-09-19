@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { decide, type DecideInput } from "../src/effects/gate.ts";
+import { decide, requiresGrant, type DecideInput } from "../src/effects/gate.ts";
 import type { EffectToolEntry } from "../src/tools/define.ts";
 
 const readEntry: EffectToolEntry = {
@@ -81,7 +81,15 @@ describe("decide", () => {
   });
 
   test("missing effect with no UI blocks with an actionable message", () => {
-    const result = decide(baseInput({ covers: () => false, hasUI: false }));
+    const result = decide(
+      baseInput({
+        toolName: "edit",
+        entry: editEntry,
+        required: [{ id: "fs.write", scope: "src/x.ts" }],
+        covers: () => false,
+        hasUI: false,
+      }),
+    );
     assert.equal(result.kind, "block");
     if (result.kind === "block") assert.match(result.reason, /request_effects|--grant/);
   });
@@ -117,5 +125,42 @@ describe("decide", () => {
     if (result.kind === "prompt") {
       assert.deepEqual(result.missing, [{ id: "fs.write", scope: "src/x.ts" }]);
     }
+  });
+
+  test("a pure (read-only) tool is always allowed, even with no grants at all and no UI", () => {
+    const result = decide(baseInput({ covers: () => false, hasUI: false }));
+    assert.equal(result.kind, "allow");
+  });
+
+  test("a read effect on an otherwise-impure tool never blocks or prompts by itself", () => {
+    const result = decide(
+      baseInput({
+        toolName: "edit",
+        entry: editEntry,
+        required: [{ id: "fs.read", scope: "src/x.ts" }],
+        covers: () => false,
+        hasUI: false,
+      }),
+    );
+    assert.equal(result.kind, "allow");
+  });
+
+  test("a denied read effect still blocks, even though reads normally need no grant", () => {
+    const result = decide(baseInput({ deniedBy: () => [{ id: "fs.read" }], covers: () => true }));
+    assert.equal(result.kind, "block");
+  });
+});
+
+describe("requiresGrant", () => {
+  test("write-mode effects require a grant", () => {
+    assert.equal(requiresGrant({ id: "fs.write" }), true);
+    assert.equal(requiresGrant({ id: "git.write", scope: "local" }), true);
+    assert.equal(requiresGrant({ id: "net.write" }), true);
+  });
+
+  test("read-mode effects never require a grant", () => {
+    assert.equal(requiresGrant({ id: "fs.read" }), false);
+    assert.equal(requiresGrant({ id: "git.read" }), false);
+    assert.equal(requiresGrant({ id: "net.read" }), false);
   });
 });

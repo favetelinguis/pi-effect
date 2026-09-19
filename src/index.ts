@@ -15,7 +15,7 @@ import { createProcCaps } from "./caps/proc.ts";
 import { loadConfig, type PiEffectConfig } from "./config.ts";
 import { registerEffectsCommand } from "./commands/effects.ts";
 import { registerToolCommand } from "./commands/tool.ts";
-import { createGateHandler, REMOVED_TOOLS } from "./effects/gate.ts";
+import { createGateHandler, REMOVED_TOOLS, requiresGrant } from "./effects/gate.ts";
 import { GrantStore } from "./effects/grants.ts";
 import type { Effect, Grant } from "./effects/model.ts";
 import { isEffectId } from "./effects/model.ts";
@@ -47,7 +47,7 @@ export default function piEffectExtension(pi: ExtensionAPI): void {
   const unknownToolsPolicy = () => config?.unknownTools ?? "warn";
 
   pi.registerFlag("grant", {
-    description: "Comma-separated effect ids (optionally id:scope) to grant for this session, e.g. fs.read,git.read",
+    description: "Comma-separated write effect ids (optionally id:scope) to grant for this session, e.g. fs.write,git.write:local -- read effects never need a grant",
     type: "string",
   });
 
@@ -62,7 +62,7 @@ export default function piEffectExtension(pi: ExtensionAPI): void {
       if (policy.denies(effect).length > 0) {
         return { ok: false, reason: `Effect "${effect.id}" is denied by policy for this call.` };
       }
-      if (!grants.covers(effect)) {
+      if (requiresGrant(effect) && !grants.covers(effect)) {
         return {
           ok: false,
           reason: `Effect "${effect.id}"${effect.scope ? ` (${effect.scope})` : ""} not granted. Call request_effects, or ask the user to run /effects grant ${effect.id}.`,
@@ -129,9 +129,6 @@ export default function piEffectExtension(pi: ExtensionAPI): void {
       }
     }
 
-    if (cfg.autoGrantRead) {
-      grants.add({ id: "fs.read", ttl: "session", source: "config", grantedAt: Date.now() });
-    }
     for (const g of cfg.defaultGrants) {
       grants.add({ ...g, ttl: "session", source: "config", grantedAt: Date.now() });
     }

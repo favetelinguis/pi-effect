@@ -78,9 +78,17 @@ muscle memory — or just let the model discover them from the tool list.
 
 Rules:
 
-- A tool is **pure** iff every effect it can produce has `mode: "read"`. Pure tools run in
-  parallel and, with `autoGrantRead` (default `true`), never prompt for `fs.read`.
-- **`write` implies `read`** within the same resource (configurable).
+- **Only write effects (`fs.write`, `git.write`, `net.write`) are gated.** Read effects
+  (`fs.read`, `git.read`, `net.read`) are *always* allowed, unconditionally, no grant or config
+  needed — the effect system exists to guard irreversible side effects, not observation. A tool
+  is **pure** iff every effect it can produce has `mode: "read"`; pure tools therefore run with
+  zero prompts, always, by construction. A mixed tool (e.g. `edit`, which also implies `fs.read`)
+  only ever prompts for its write effect — the read half is free.
+- Deny-list policy (below) still applies to read effects too: reading `.env`/`.ssh`/etc. is
+  blocked regardless of purity. "Always allowed" means "never needs a grant", not "bypasses
+  policy".
+- **`write` implies `read`** within the same resource (configurable) — mostly relevant for
+  `/effects list` bookkeeping now, since read coverage is no longer checked by the gate.
 - A grant without a scope covers every requirement for that effect id. A scoped grant only
   covers requirements whose scope glob-matches.
 - Deny policies (config) win over grants and can never be approved interactively. Defaults:
@@ -88,8 +96,8 @@ Rules:
 
 ## Usage
 
-- **Explore freely.** `read`, `grep`, `find`, `ls`, and the `git_*` read tools work with zero
-  prompts by default.
+- **Explore freely.** `read`, `grep`, `find`, `ls`, the `git_*` read tools, and `http_request`
+  GET/HEAD calls work with zero prompts, unconditionally — read effects are never gated.
 - **First mutation prompts.** The first `edit`/`write`/`delete_file`/`git_commit`/... call triggers
   *"`<tool>` needs: `<effect>`. [Allow once] [Allow for session] [Deny]"*. "Allow for session"
   persists as a `pi-effect:grant` session entry — visible in the transcript, survives
@@ -101,8 +109,9 @@ Rules:
 - **`/effects`** — list, grant, revoke, and audit effect grants (`/effects`, `/effects list`,
   `/effects grant <id> [scope]`, `/effects revoke <id> [scope]`, `/effects clear`,
   `/effects log`).
-- **Headless (`-p`, `--mode json`, RPC without UI):** nothing ungranted runs. Seed grants with
-  `--grant fs.read,git.read` or a `defaultGrants` config entry.
+- **Headless (`-p`, `--mode json`, RPC without UI):** reads always work. No ungranted *write*
+  runs. Seed write grants with `--grant fs.write,git.write:local` or a `defaultGrants` config
+  entry.
 
 ## Config
 
@@ -111,9 +120,8 @@ Rules:
 
 ```json
 {
-  "autoGrantRead": true,
   "writeImpliesRead": true,
-  "defaultGrants": [{ "id": "git.read" }],
+  "defaultGrants": [{ "id": "git.write", "scope": "local" }],
   "defaultDisabledTools": ["git_push"],
   "deny": [
     { "id": "fs.write", "scope": "**/.env*" },

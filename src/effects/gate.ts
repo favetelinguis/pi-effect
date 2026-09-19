@@ -6,13 +6,24 @@
 
 import type { ExtensionAPI, ExtensionContext, ToolCallEvent } from "@earendil-works/pi-coding-agent";
 import type { Effect } from "./model.ts";
-import { formatEffect } from "./model.ts";
+import { formatEffect, modeOf } from "./model.ts";
 import type { GrantStore } from "./grants.ts";
 import type { PolicyLike } from "./policy.ts";
 import type { EffectCatalog, EffectToolEntry } from "../tools/define.ts";
 
 /** Tool names removed entirely by pi-effect policy. No escape hatch. */
 export const REMOVED_TOOLS = new Set(["bash", "powershell"]);
+
+/**
+ * The grant/prompt system exists to gate irreversible side effects, not to gate
+ * observation. Only write-mode effects are ever "missing" and can trigger a JIT
+ * prompt, a block, or show up in request_effects. Read-mode effects (fs.read,
+ * git.read, net.read) are always allowed once they clear policy deny rules --
+ * pure tools work with zero prompts, unconditionally, no grant or config needed.
+ */
+export function requiresGrant(effect: Effect): boolean {
+  return modeOf(effect.id) === "write";
+}
 
 export type UnknownToolsPolicy = "warn" | "block" | "allow";
 
@@ -71,7 +82,7 @@ export function decide(input: DecideInput): GateDecision {
     };
   }
 
-  const missing = input.required.filter((e) => !input.covers(e));
+  const missing = input.required.filter((e) => requiresGrant(e) && !input.covers(e));
   if (missing.length === 0) {
     return { kind: "allow" };
   }
