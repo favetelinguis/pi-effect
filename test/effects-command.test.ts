@@ -1,13 +1,30 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { registerEffectsCommand } from "../src/commands/effects.ts";
 import { GrantStore } from "../src/effects/grants.ts";
 import { Policy } from "../src/effects/policy.ts";
 import type { Grant } from "../src/effects/model.ts";
 
+type RegisteredCommand = {
+  handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
+  getArgumentCompletions?: (prefix: string) => AutocompleteItem[] | null;
+};
+
+/**
+ * Mirrors pi-tui's CombinedAutocompleteProvider.applyCompletion() for the
+ * command-argument case: the full text after "/effects " is `prefix`, and
+ * accepting `item` replaces that entire string with `item.value`. This lets
+ * tests assert on the resulting argument string, not just item.value in
+ * isolation — which is what actually caught the "revoke disappears" bug.
+ */
+function applyCompletion(item: AutocompleteItem): string {
+  return item.value;
+}
+
 function makeHarness() {
-  const commands = new Map<string, { handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> }>();
+  const commands = new Map<string, RegisteredCommand>();
   const pi = {
     registerCommand: (name: string, opts: never) => {
       commands.set(name, opts as never);
@@ -38,7 +55,13 @@ function makeHarness() {
     await cmd.handler(args, ctx);
   }
 
-  return { grants, notes, run };
+  function complete(argumentText: string): AutocompleteItem[] {
+    const cmd = commands.get("effects");
+    if (!cmd?.getArgumentCompletions) throw new Error("effects command has no getArgumentCompletions");
+    return cmd.getArgumentCompletions(argumentText) ?? [];
+  }
+
+  return { grants, notes, run, complete };
 }
 
 function grant(partial: Partial<Grant> & Pick<Grant, "id">): Grant {
@@ -96,5 +119,49 @@ describe("/effects list", () => {
     grants.add(grant({ id: "fs.write", scope: "/repo/.gitignore" }));
     await run("list");
     assert.ok(notes.some((n) => n.msg.includes("/effects revoke fs.write:/repo/.gitignore")));
+  });
+});
+
+describe("/effects argument completion (regression: accepting a suggestion must not drop the subcommand)", () => {
+  // pi replaces the ENTIRE argument text after "/effects " with the chosen
+  // item's value (see pi-tui's CombinedAutocompleteProvider.applyCompletion).
+  // A completion value of just "fs.write" would turn "/effects revoke fs.write"
+  // into "/effects fs.write" on accept — losing "revoke" entirely.
+
+  test("subcommand-level completions only replace the subcommand token", () => {
+    const { complete } = makeHarness();
+    const items = complete("rev");
+    assert.ok(items.some((i) => i.value === "revoke"));
+  });
+
+  test("revoke completions include active scoped grants, in colon form, with 'revoke ' reconstructed", () => {
+    const { grants, complete } = makeHarness();
+    grants.add(grant({ id: "fs.write", scope: "/repo/.gitignore" }));
+
+    const items = complete("revoke fs.write");
+    const values = items.map((i) => i.value);
+
+    assert.ok(values.includes("revoke fs.write:/repo/.gitignore"), `expected scoped grant in ${JSON.stringify(values)}`);
+    assert.ok(values.includes("revoke fs.write"), `expected bare id in ${JSON.stringify(values)}`);
+
+    // Simulate accepting the scoped suggestion: the resulting full argument
+    // string must still start with "revoke ", not just be the id/scope.
+    const chosen = items.find((i) => i.label === "fs.write:/repo/.gitignore");
+    assert.ok(chosen);
+    assert.equal(applyCompletion(chosen!), "revoke fs.write:/repo/.gitignore");
+  });
+
+  test("grant completions reconstruct 'grant <id>', never a bare id", () => {
+    const { complete } = makeHarness();
+    const items = complete("grant git.wr");
+    assert.ok(items.length > 0);
+    for (const item of items) {
+      assert.match(item.value, /^grant /);
+    }
+  });
+
+  test("unknown subcommand yields no argument completions", () => {
+    const { complete } = makeHarness();
+    assert.deepEqual(complete("bogus fs.wr"), []);
   });
 });

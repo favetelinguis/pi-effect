@@ -50,20 +50,58 @@ function parseEffectArgs(args: string): { id: string; scope?: string } | undefin
 export function registerEffectsCommand(pi: ExtensionAPI, deps: EffectsCommandDeps): void {
   pi.registerCommand("effects", {
     description: "Inspect, grant, or revoke pi-effect capability grants",
+    // IMPORTANT: pi replaces the ENTIRE argument text (everything after
+    // "/effects ") with the selected item's `value` — not just the last word
+    // being typed. Every value returned here must therefore reconstruct the
+    // full "<subcommand> <id...>" string, not just the id/scope fragment.
     getArgumentCompletions(prefix: string): AutocompleteItem[] | null {
-      const [sub, ...rest] = prefix.split(" ");
-      const subcommands = ["list", "grant", "revoke", "clear", "log"];
-      if (rest.length === 0 && !prefix.includes(" ")) {
-        const items = subcommands.filter((s) => s.startsWith(sub ?? "")).map((s) => ({ value: s, label: s }));
+      const spaceIndex = prefix.indexOf(" ");
+
+      if (spaceIndex === -1) {
+        const subcommands = ["list", "grant", "revoke", "clear", "log"];
+        const items = subcommands.filter((s) => s.startsWith(prefix)).map((s) => ({ value: s, label: s }));
         return items.length > 0 ? items : null;
       }
-      if (sub === "grant" || sub === "revoke") {
-        const idPrefix = rest.join(" ");
-        const items = ALL_EFFECT_IDS.filter((id) => id.startsWith(idPrefix)).map((id) => ({ value: id, label: id }));
+
+      const sub = prefix.slice(0, spaceIndex);
+      const idPrefix = prefix.slice(spaceIndex + 1).replace(/^\s+/, "");
+
+      if (sub === "grant") {
+        const items = ALL_EFFECT_IDS.filter((id) => id.startsWith(idPrefix)).map((id) => ({
+          value: `grant ${id}`,
+          label: id,
+        }));
         return items.length > 0 ? items : null;
       }
+
+      if (sub === "revoke") {
+        const seen = new Set<string>();
+        const items: AutocompleteItem[] = [];
+
+        // Exact active grants first (colon form, matches /effects list display) so
+        // scoped grants like fs.write:.gitignore are actually offered.
+        for (const g of deps.grants.list()) {
+          const display = formatEffect(g);
+          if (display.startsWith(idPrefix) && !seen.has(display)) {
+            seen.add(display);
+            items.push({ value: `revoke ${display}`, label: display, description: "active grant" });
+          }
+        }
+
+        // Bare ids too, to revoke every scope for that id at once.
+        for (const id of ALL_EFFECT_IDS) {
+          if (id.startsWith(idPrefix) && !seen.has(id)) {
+            seen.add(id);
+            items.push({ value: `revoke ${id}`, label: id, description: "revoke all scopes for this id" });
+          }
+        }
+
+        return items.length > 0 ? items : null;
+      }
+
       return null;
     },
+
     handler: async (args, ctx) => {
       const [sub, ...rest] = args.trim().split(/\s+/).filter(Boolean);
       const restArgs = rest.join(" ");

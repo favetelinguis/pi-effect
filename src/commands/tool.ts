@@ -26,16 +26,27 @@ function summaryLine(catalog: EffectCatalog, name: string): string {
 export function registerToolCommand(pi: ExtensionAPI, deps: ToolCommandDeps): void {
   pi.registerCommand("tool", {
     description: "List, toggle, or inspect pi-effect tools",
+    // IMPORTANT: pi replaces the ENTIRE argument text (everything after
+    // "/tool ") with the selected item's `value` — not just the last word
+    // being typed. Every value returned here must reconstruct the full
+    // "<subcommand> <name>" string, not just the name fragment.
     getArgumentCompletions(prefix: string): AutocompleteItem[] | null {
-      const [sub, ...rest] = prefix.split(" ");
-      const subcommands = ["list", "on", "off", "info"];
-      if (rest.length === 0 && !prefix.includes(" ")) {
-        const items = subcommands.filter((s) => s.startsWith(sub ?? "")).map((s) => ({ value: s, label: s }));
+      const spaceIndex = prefix.indexOf(" ");
+
+      if (spaceIndex === -1) {
+        const subcommands = ["list", "on", "off", "info"];
+        const items = subcommands.filter((s) => s.startsWith(prefix)).map((s) => ({ value: s, label: s }));
         return items.length > 0 ? items : null;
       }
-      const toolPrefix = rest.join(" ");
+
+      const sub = prefix.slice(0, spaceIndex);
+      if (sub !== "on" && sub !== "off" && sub !== "info") return null;
+
+      const namePrefix = prefix.slice(spaceIndex + 1).replace(/^\s+/, "");
       const names = deps.catalog.all().map((e) => e.name);
-      const items = names.filter((n) => n.startsWith(toolPrefix)).map((n) => ({ value: n, label: n }));
+      const items = names
+        .filter((n) => n.startsWith(namePrefix))
+        .map((n) => ({ value: `${sub} ${n}`, label: n }));
       return items.length > 0 ? items : null;
     },
     handler: async (args, ctx) => {
