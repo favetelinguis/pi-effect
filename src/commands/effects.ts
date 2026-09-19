@@ -10,6 +10,7 @@ import { ALL_EFFECT_IDS, formatEffect, isEffectId, type Effect, type Grant } fro
 import type { GrantStore } from "../effects/grants.ts";
 import type { PolicyLike } from "../effects/policy.ts";
 import { readAuditLines } from "../caps/audit.ts";
+import { makeHeader } from "../ui/header.ts";
 
 export interface EffectsCommandDeps {
   grants: GrantStore;
@@ -133,16 +134,13 @@ export function registerEffectsCommand(pi: ExtensionAPI, deps: EffectsCommandDep
           const items = [...activeItems, ...baseItems];
 
           const container = new Container();
-          container.addChild({
-            render() {
-              return [
-                theme.fg("accent", theme.bold("Effect Grants")),
-                theme.fg("dim", "Enter/Space to toggle. Active grants (incl. scoped) revoke directly; base ids grant unscoped. Esc closes."),
-                "",
-              ];
-            },
-            invalidate() {},
-          });
+          container.addChild(
+            makeHeader([
+              theme.fg("accent", theme.bold("Effect Grants")),
+              theme.fg("dim", "Enter/Space to toggle. Active grants (incl. scoped) revoke directly; base ids grant unscoped. Esc closes."),
+              "",
+            ]),
+          );
 
           const settingsList = new SettingsList(
             items,

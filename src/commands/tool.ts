@@ -8,6 +8,7 @@ import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import { Container, SettingsList, type SettingItem } from "@earendil-works/pi-tui";
 import { REMOVED_TOOLS } from "../effects/gate.ts";
 import { effectsLabel, purityBadge } from "../ui/badges.ts";
+import { makeHeader } from "../ui/header.ts";
 import type { EffectCatalog } from "../tools/define.ts";
 
 export interface ToolCommandDeps {
@@ -69,16 +70,13 @@ export function registerToolCommand(pi: ExtensionAPI, deps: ToolCommandDeps): vo
           }));
 
           const container = new Container();
-          container.addChild({
-            render() {
-              return [
-                theme.fg("accent", theme.bold("Tool Configuration")),
-                theme.fg("dim", "⚡ = impure   ○ = pure   bash/powershell removed by policy   request_effects always on"),
-                "",
-              ];
-            },
-            invalidate() {},
-          });
+          container.addChild(
+            makeHeader([
+              theme.fg("accent", theme.bold("Tool Configuration")),
+              theme.fg("dim", "⚡ = impure   ○ = pure   bash/powershell removed by policy   request_effects always on"),
+              "",
+            ]),
+          );
 
           const settingsList = new SettingsList(
             items,

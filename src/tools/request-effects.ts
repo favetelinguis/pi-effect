@@ -12,6 +12,7 @@ import { Type, type Static } from "typebox";
 import { ALL_EFFECT_IDS, formatEffect, type Grant } from "../effects/model.ts";
 import type { GrantStore } from "../effects/grants.ts";
 import type { PolicyLike } from "../effects/policy.ts";
+import { makeHeader } from "../ui/header.ts";
 import type { EffectCatalog } from "./define.ts";
 
 const RequestEffectsParams = Type.Object({
@@ -77,16 +78,13 @@ async function showChecklist(
     ];
 
     const container = new Container();
-    container.addChild({
-      render(_width: number) {
-        return [
-          theme.fg("accent", theme.bold("Requested effects")),
-          theme.fg("dim", "Enter/Space to toggle grant/skip. Select \"Confirm and apply\" to submit. Esc cancels everything."),
-          "",
-        ];
-      },
-      invalidate() {},
-    });
+    container.addChild(
+      makeHeader([
+        theme.fg("accent", theme.bold("Requested effects")),
+        theme.fg("dim", "Enter/Space to toggle grant/skip. Select \"Confirm and apply\" to submit. Esc cancels everything."),
+        "",
+      ]),
+    );
 
     const settingsList = new SettingsList(
       items,
