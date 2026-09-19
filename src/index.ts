@@ -9,6 +9,7 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { appendAuditLine } from "./caps/audit.ts";
+import { createFsCaps } from "./caps/fs.ts";
 import { createNetCaps } from "./caps/net.ts";
 import { createProcCaps } from "./caps/proc.ts";
 import { loadConfig, type PiEffectConfig } from "./config.ts";
@@ -21,6 +22,7 @@ import { isEffectId } from "./effects/model.ts";
 import { Policy, type PolicyLike } from "./effects/policy.ts";
 import { buildEffectsPromptSection } from "./prompt.ts";
 import { registerBuiltinTools } from "./tools/builtins.ts";
+import { registerDeleteFileTool } from "./tools/delete.ts";
 import { EffectCatalog } from "./tools/define.ts";
 import { registerGitTools } from "./tools/git.ts";
 import { registerHttpTool } from "./tools/http.ts";
@@ -102,8 +104,10 @@ export default function piEffectExtension(pi: ExtensionAPI): void {
 
     const procCaps = createProcCaps(pi);
     const netCaps = createNetCaps();
+    const fsCaps = createFsCaps();
 
     registerBuiltinTools(pi, catalog, ctx.cwd, runtimeCheck);
+    registerDeleteFileTool(pi, catalog, fsCaps, ctx.cwd, runtimeCheck);
     registerGitTools(pi, catalog, procCaps, runtimeCheck);
     registerHttpTool(pi, catalog, netCaps, runtimeCheck);
     registerRequestEffectsTool(pi, { catalog, grants, policy: policyView, onGrant: persistGrant });

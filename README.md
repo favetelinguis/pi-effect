@@ -62,15 +62,15 @@ Then either:
 - **Persistent (global):** symlink or copy this directory to `~/.pi/agent/extensions/pi-effect`
 - **Persistent (project):** symlink or copy this directory to `.pi/extensions/pi-effect`
 
-With `bash` gone, add `read/grep/find/ls/edit/write/git_*/http_request` to your muscle memory —
-or just let the model discover them from the tool list.
+With `bash` gone, add `read/grep/find/ls/edit/write/delete_file/git_*/http_request` to your
+muscle memory — or just let the model discover them from the tool list.
 
 ## Effect vocabulary
 
 | Effect      | Meaning                                   | Tools                                                               |
 | ----------- | ------------------------------------------ | -------------------------------------------------------------------- |
 | `fs.read`   | Read file contents, list, search           | `read`, `grep`, `find`, `ls`                                         |
-| `fs.write`  | Create or modify files (scope = path)      | `edit`, `write`                                                      |
+| `fs.write`  | Create, modify, or delete files (scope = path) | `edit`, `write`, `delete_file`                                    |
 | `git.read`  | Inspect repo state                         | `git_status`, `git_log`, `git_diff`, `git_show`, `git_branch_list`   |
 | `git.write` | Mutate repo (scope = `local` \| `remote`)  | `git_add`, `git_commit`, `git_checkout`, `git_push`                  |
 | `net.read`  | HTTP GET/HEAD (scope = host)               | `http_request`                                                       |
@@ -90,7 +90,7 @@ Rules:
 
 - **Explore freely.** `read`, `grep`, `find`, `ls`, and the `git_*` read tools work with zero
   prompts by default.
-- **First mutation prompts.** The first `edit`/`write`/`git_commit`/... call triggers
+- **First mutation prompts.** The first `edit`/`write`/`delete_file`/`git_commit`/... call triggers
   *"`<tool>` needs: `<effect>`. [Allow once] [Allow for session] [Deny]"*. "Allow for session"
   persists as a `pi-effect:grant` session entry — visible in the transcript, survives
   `/reload`/`/resume`, revert-able via `/tree`.
@@ -147,6 +147,7 @@ src/
 ├── tools/
 │   ├── define.ts          defineEffectTool / registerEffectTool / EffectCatalog
 │   ├── builtins.ts        read/grep/find/ls/edit/write, wrapped with effect metadata
+│   ├── delete.ts           delete_file (fs.write, scoped to the resolved path)
 │   ├── git.ts              git_status/log/diff/show/branch_list/add/commit/checkout/push
 │   ├── http.ts              http_request
 │   └── request-effects.ts  the upfront batch-approval tool
@@ -167,9 +168,11 @@ they declare" without an Effect-TS `R` channel.
 
 - `bash`/`powershell` are blocked unconditionally — skills or prompts that assume a shell will
   break by design.
-- `effectsFor()` for `edit`/`write` resolves paths against the extension's `cwd` at tool
-  registration time (session start), not per-call `ctx.cwd`. This only matters if `cwd` changes
-  mid-session, which pi does not currently do.
+- `effectsFor()` for `edit`/`write`/`delete_file` resolves paths against the extension's `cwd`
+  at tool registration time (session start), not per-call `ctx.cwd`. This only matters if `cwd`
+  changes mid-session, which pi does not currently do.
+- `delete_file` only deletes a single file, never a directory (fails loudly instead of
+  recursing). There is no `delete_directory`/`rm -rf` tool by design.
 - `/tool` and `/effects` interactive UIs require TUI mode; RPC/print mode fall back to
   `list`/`grant`/`revoke` subcommands.
 - The audit log (`~/.pi/agent/pi-effect/audit.jsonl`) is append-only and unbounded; rotate it

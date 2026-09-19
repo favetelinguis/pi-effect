@@ -3,7 +3,7 @@
  * import node:fs. `npm run check` greps src/tools/** for violations.
  */
 
-import { mkdir as fsMkdir, readdir as fsReaddir, readFile as fsReadFile, stat as fsStat, writeFile as fsWriteFile } from "node:fs/promises";
+import { mkdir as fsMkdir, readdir as fsReaddir, readFile as fsReadFile, stat as fsStat, unlink as fsUnlink, writeFile as fsWriteFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 
@@ -13,6 +13,7 @@ export interface FsCaps {
   readdir(absPath: string): Promise<string[]>;
   writeFile(absPath: string, content: string): Promise<void>;
   mkdir(absDir: string): Promise<void>;
+  unlink(absPath: string): Promise<void>;
 }
 
 export function createFsCaps(): FsCaps {
@@ -27,5 +28,10 @@ export function createFsCaps(): FsCaps {
       });
     },
     mkdir: (absDir) => fsMkdir(absDir, { recursive: true }).then(() => undefined),
+    async unlink(absPath) {
+      await withFileMutationQueue(absPath, async () => {
+        await fsUnlink(absPath);
+      });
+    },
   };
 }
