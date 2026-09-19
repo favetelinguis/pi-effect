@@ -10,7 +10,48 @@ pure TypeScript (`src/effects/model.ts`).
 
 ## Install
 
+This is a [pi package](https://github.com/earendil-works/pi-mono) — install it straight from
+GitHub, no local clone or build step required.
+
+**Install for all projects (writes to `~/.pi/agent/settings.json`):**
+
 ```bash
+pi install git:github.com/favetelinguis/pi-effect
+```
+
+**Install for the current project only (writes to `.pi/settings.json`, shareable with your team):**
+
+```bash
+pi install -l git:github.com/favetelinguis/pi-effect
+```
+
+**Try it once without installing** (clones to a temp dir for this run only):
+
+```bash
+pi -e git:github.com/favetelinguis/pi-effect
+```
+
+SSH clone also works if you prefer it over HTTPS:
+
+```bash
+pi install git:git@github.com:favetelinguis/pi-effect
+```
+
+Pi clones the repo, runs `npm install` in it automatically, and picks up the extension from the
+`pi.extensions` entry in `package.json` — nothing else to configure. Manage it later with:
+
+```bash
+pi list                                       # see installed packages
+pi update git:github.com/favetelinguis/pi-effect   # pull the latest pinned ref
+pi remove git:github.com/favetelinguis/pi-effect
+```
+
+### Local development install
+
+If you're hacking on this extension itself:
+
+```bash
+git clone git@github.com:favetelinguis/pi-effect.git
 cd pi-effect
 npm install
 ```
@@ -137,5 +178,5 @@ they declare" without an Effect-TS `R` channel.
 ## Post-MVP ideas
 
 See `PLAN.md` section 5 backlog: `aws_*` tools, scoped-grant pickers, grant TTLs like
-`"turns:5"`, effect profiles (`/effects profile review`), sub-agent capability attenuation,
-sandbox-level enforcement, and publishing as a `pi install`-able package.
+`"turns:5"`, effect profiles (`/effects profile review`), sub-agent capability attenuation, and
+sandbox-level enforcement.
