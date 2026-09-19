@@ -20,11 +20,31 @@ export interface EffectsCommandDeps {
   updateStatus: (ctx: ExtensionContext) => void;
 }
 
+/**
+ * Accepts both notations so users can copy-paste what they see on screen:
+ *   /effects revoke fs.write:.gitignore   (colon form, matches formatEffect() display)
+ *   /effects revoke fs.write .gitignore   (space form)
+ *   /effects revoke fs.write              (no scope: matches every scope for that id)
+ */
 function parseEffectArgs(args: string): { id: string; scope?: string } | undefined {
-  const [id, ...rest] = args.trim().split(/\s+/).filter(Boolean);
-  if (!id) return undefined;
+  const trimmed = args.trim();
+  if (!trimmed) return undefined;
+  const [first, ...rest] = trimmed.split(/\s+/).filter(Boolean);
+  if (!first) return undefined;
+
+  const colonIndex = first.indexOf(":");
+  if (colonIndex !== -1) {
+    const idPart = first.slice(0, colonIndex);
+    if (isEffectId(idPart)) {
+      const scopeFromColon = first.slice(colonIndex + 1);
+      const restScope = rest.length > 0 ? rest.join(" ") : undefined;
+      const scope = [scopeFromColon, restScope].filter((s) => s && s.length > 0).join(" ") || undefined;
+      return { id: idPart, scope };
+    }
+  }
+
   const scope = rest.length > 0 ? rest.join(" ") : undefined;
-  return { id, scope };
+  return { id: first, scope };
 }
 
 export function registerEffectsCommand(pi: ExtensionAPI, deps: EffectsCommandDeps): void {
@@ -54,35 +74,67 @@ export function registerEffectsCommand(pi: ExtensionAPI, deps: EffectsCommandDep
           return;
         }
         await ctx.ui.custom<void>((_tui, theme, _kb, done) => {
-          const items: SettingItem[] = ALL_EFFECT_IDS.map((id) => ({
-            id,
-            label: id,
-            currentValue: deps.grants.covers({ id }) ? "granted" : "not granted",
-            values: ["granted", "not granted"],
+          // Active grants first (including scoped ones like fs.write:.gitignore) so
+          // they're directly toggleable, not just visible via /effects list.
+          const activeItems: SettingItem[] = deps.grants.list().map((g) => ({
+            id: `active\u0000${formatEffect(g)}`,
+            label: formatEffect(g),
+            description: `${g.source}${g.reason ? ` — "${g.reason}"` : ""}`,
+            currentValue: "granted",
+            values: ["granted", "revoke"],
           }));
+
+          // Base unscoped ids, so ungranted effects can be granted from here too.
+          const baseItems: SettingItem[] = ALL_EFFECT_IDS.filter((id) => !deps.grants.list().some((g) => g.id === id && g.scope === undefined)).map((id) => ({
+            id: `base\u0000${id}`,
+            label: id,
+            currentValue: "not granted",
+            values: ["not granted", "granted (unscoped)"],
+          }));
+
+          const items = [...activeItems, ...baseItems];
 
           const container = new Container();
           container.addChild({
             render() {
-              return [theme.fg("accent", theme.bold("Effect Grants (unscoped)")), theme.fg("dim", "Toggle unscoped session grants. Use /effects grant/revoke for scoped grants."), ""];
+              return [
+                theme.fg("accent", theme.bold("Effect Grants")),
+                theme.fg("dim", "Enter/Space to toggle. Active grants (incl. scoped) revoke directly; base ids grant unscoped. Esc closes."),
+                "",
+              ];
             },
             invalidate() {},
           });
 
           const settingsList = new SettingsList(
             items,
-            Math.min(items.length + 2, 15),
+            Math.min(items.length + 2, 18),
             getSettingsListTheme(),
-            (id, newValue) => {
-              if (newValue === "granted") {
-                const grant: Grant = { id: id as never, ttl: "session", source: "command", grantedAt: Date.now() };
-                deps.grants.add(grant);
-                deps.persistGrant(grant, ctx);
+            (rowId, newValue) => {
+              const [kind, payload] = rowId.split("\u0000");
+              if (kind === "active") {
+                // payload is the formatEffect() string; parse it back into id[:scope].
+                const colonIndex = payload.indexOf(":");
+                const id = colonIndex === -1 ? payload : payload.slice(0, colonIndex);
+                const scope = colonIndex === -1 ? undefined : payload.slice(colonIndex + 1);
+                if (newValue === "revoke") {
+                  deps.grants.revoke({ id: id as never, scope });
+                  deps.persistRevoke({ id: id as never, scope }, ctx);
+                  deps.updateStatus(ctx);
+                  ctx.ui.notify(`Revoked ${payload}. Reopen /effects to see the updated list.`, "info");
+                  done(undefined); // the grant list changed shape; SettingsList can't remove rows in place
+                }
               } else {
-                deps.grants.revoke({ id: id as never });
-                deps.persistRevoke({ id: id as never }, ctx);
+                const id = payload;
+                if (newValue === "granted (unscoped)") {
+                  const grant: Grant = { id: id as never, ttl: "session", source: "command", grantedAt: Date.now() };
+                  deps.grants.add(grant);
+                  deps.persistGrant(grant, ctx);
+                  deps.updateStatus(ctx);
+                  ctx.ui.notify(`Granted ${id} for this session. Reopen /effects to see the updated list.`, "info");
+                  done(undefined);
+                }
               }
-              deps.updateStatus(ctx);
             },
             () => done(undefined),
           );
@@ -111,7 +163,9 @@ export function registerEffectsCommand(pi: ExtensionAPI, deps: EffectsCommandDep
           return;
         }
         const lines = list.map(
-          (g) => `${formatEffect(g)} — ${g.source}${g.reason ? ` ("${g.reason}")` : ""} @ ${new Date(g.grantedAt).toLocaleTimeString()}`,
+          (g) =>
+            `${formatEffect(g)} — ${g.source}${g.reason ? ` ("${g.reason}")` : ""} @ ${new Date(g.grantedAt).toLocaleTimeString()}` +
+            `  →  /effects revoke ${formatEffect(g)}`,
         );
         ctx.ui.notify(lines.join("\n"), "info");
         return;
@@ -120,7 +174,10 @@ export function registerEffectsCommand(pi: ExtensionAPI, deps: EffectsCommandDep
       if (sub === "grant") {
         const parsed = parseEffectArgs(restArgs);
         if (!parsed || !isEffectId(parsed.id)) {
-          ctx.ui.notify(`Usage: /effects grant <id> [scope]. Valid ids: ${ALL_EFFECT_IDS.join(", ")}`, "warning");
+          ctx.ui.notify(
+            `Usage: /effects grant <id>[:<scope>]  or  /effects grant <id> <scope>\nValid ids: ${ALL_EFFECT_IDS.join(", ")}`,
+            "warning",
+          );
           return;
         }
         const effect: Effect = { id: parsed.id, scope: parsed.scope };
@@ -139,14 +196,26 @@ export function registerEffectsCommand(pi: ExtensionAPI, deps: EffectsCommandDep
       if (sub === "revoke") {
         const parsed = parseEffectArgs(restArgs);
         if (!parsed || !isEffectId(parsed.id)) {
-          ctx.ui.notify(`Usage: /effects revoke <id> [scope]. Valid ids: ${ALL_EFFECT_IDS.join(", ")}`, "warning");
+          ctx.ui.notify(
+            `Usage: /effects revoke <id>[:<scope>]  or  /effects revoke <id> <scope>\n` +
+              `Omit the scope to revoke every scope for that id at once (e.g. "/effects revoke fs.write" removes fs.write:.gitignore too).\n` +
+              `See exact grants with /effects list. Valid ids: ${ALL_EFFECT_IDS.join(", ")}`,
+            "warning",
+          );
           return;
         }
         const effect: Effect = { id: parsed.id, scope: parsed.scope };
         const removed = deps.grants.revoke(effect);
         deps.persistRevoke(effect, ctx);
         deps.updateStatus(ctx);
-        ctx.ui.notify(removed.length > 0 ? `Revoked ${formatEffect(effect)}.` : `No matching grant for ${formatEffect(effect)}.`, "info");
+        if (removed.length > 0) {
+          ctx.ui.notify(`Revoked ${removed.map(formatEffect).join(", ")}.`, "info");
+        } else {
+          ctx.ui.notify(
+            `No matching grant for ${formatEffect(effect)}. Run /effects list to see exact scopes, or /effects revoke ${parsed.id} (no scope) to remove all of them.`,
+            "warning",
+          );
+        }
         return;
       }
 

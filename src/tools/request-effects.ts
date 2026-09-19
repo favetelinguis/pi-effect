@@ -37,6 +37,8 @@ function itemKey(id: string, scope?: string): string {
   return scope ? `${id}\u0000${scope}` : id;
 }
 
+const CONFIRM_ID = "__confirm__";
+
 async function showChecklist(
   ctx: ExtensionContext,
   requests: RequestEffectsInput["effects"],
@@ -53,19 +55,35 @@ async function showChecklist(
     return decisions;
   }
 
-  await ctx.ui.custom<void>((_tui, theme, _kb, done) => {
-    const items: SettingItem[] = requests.map((r) => ({
-      id: itemKey(r.id, r.scope),
-      label: r.scope ? `${r.id} (${r.scope})` : r.id,
-      description: r.reason,
-      currentValue: "grant",
-      values: ["grant", "skip"],
-    }));
+  // Escape always cancels the whole batch (deny everything), matching every
+  // other pi dialog. Confirming requires explicitly activating the "Confirm"
+  // row, since SettingsList's only "close" affordance (Escape) is onCancel.
+  const confirmed = await ctx.ui.custom<boolean>((_tui, theme, _kb, done) => {
+    const items: SettingItem[] = [
+      ...requests.map((r) => ({
+        id: itemKey(r.id, r.scope),
+        label: r.scope ? `${r.id} (${r.scope})` : r.id,
+        description: r.reason,
+        currentValue: "grant",
+        values: ["grant", "skip"],
+      })),
+      {
+        id: CONFIRM_ID,
+        label: "✅ Confirm and apply",
+        description: "Grant every item still set to \"grant\" above and deny the rest.",
+        currentValue: "press enter/space",
+        values: ["press enter/space"],
+      },
+    ];
 
     const container = new Container();
     container.addChild({
       render(_width: number) {
-        return [theme.fg("accent", theme.bold("Requested effects")), theme.fg("dim", "Enter/Space to toggle, Escape to confirm"), ""];
+        return [
+          theme.fg("accent", theme.bold("Requested effects")),
+          theme.fg("dim", "Enter/Space to toggle grant/skip. Select \"Confirm and apply\" to submit. Esc cancels everything."),
+          "",
+        ];
       },
       invalidate() {},
     });
@@ -75,9 +93,13 @@ async function showChecklist(
       Math.min(items.length + 2, 15),
       getSettingsListTheme(),
       (id, newValue) => {
+        if (id === CONFIRM_ID) {
+          done(true);
+          return;
+        }
         decisions.set(id, newValue === "grant");
       },
-      () => done(undefined),
+      () => done(false),
     );
 
     container.addChild(settingsList);
@@ -94,6 +116,12 @@ async function showChecklist(
       },
     };
   });
+
+  if (!confirmed) {
+    // Cancelled (Escape): deny every requested effect, regardless of what was
+    // toggled before cancelling.
+    for (const r of requests) decisions.set(itemKey(r.id, r.scope), false);
+  }
 
   return decisions;
 }
